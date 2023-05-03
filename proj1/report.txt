@@ -1,0 +1,14 @@
+1.Group Number: 8
+Group Member:
+Fang Zhang, Qiushi Huang, 
+Zhengyang Song, Zhaopeng Yan
+
+2.https://github.com/huangqs/OSproject1
+
+proj1-final-design.pdf
+
+tar.gz.
+
+tar zcvf project_1.tar.gz threads
+
+latexdiff E:\proj1-initial-design.tex E:\proj1-final-design_.tex > proj1-final-design.tex

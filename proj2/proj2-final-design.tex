@@ -1,0 +1,570 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{epsfig}
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+\title{Project 2 Final Design Document}
+\author{Fang Zhang,\\
+Qiushi Huang,\\
+Zhengyang Song,\\
+Zhaopeng Yan
+}
+
+\begin{document}
+
+\maketitle
+
+\section{Anouncement}
+
+We add a ``Test cases" part of every task, uniform the formats and correct some typos. Most of the implementations are the same as the initial design, except that we add a UserFileSystem in UserKernel.java to make sure ``unlink"  will function as expected.
+
+\section{File system calls (creat, open, read, write, close, unlink)}
+
+\subsection{Design}
+
+First we need to complete the handleSyscall function based on the given system call id. Based on the arguments every system call needs we declare the corresponding arguments for the new handle functions.
+
+Also, noticing the similarity between open() and creat(), we just use a single handler handleOpen() to handle both, with an extra boolean argument to indicate whether creating a new file is allowed.
+
+We use a stack of integers to store the unused file descriptors so far, which is initialized to be 2 to 15 (since 0, 1 are reserved for special use) in load().
+
+We also use an array of length 16 (since the number of file descriptors is just 16) to indicate the files opened so far, which is initialized to be 0 as standard input and 1 as standard output as required.
+
+The main idea is as follows: for creat() and open() we use FileSystem.open(); for read(), write(), close() we use OpenFile.read(), OpenFile.write(), OpenFile.close(); for unlink() we use FileSystem.remove().
+
+\subsection{Variables and functions}
+\begin{itemize}
+\item int handleOpen(int namePtr, boolean create)
+\item int handleRead(int fileDescriptor, int bufferPtr, int count)
+\item int handleWrite(int fileDescriptor, int bufferPtr, int count)
+\item int handleClose(int fileDescriptor)
+\item int handleUnlink(int namePtr)
+\end{itemize}
+
+\begin{itemize}
+\item OpenFile[] openedFiles
+\item Stack$\langle$Integer$\rangle$ unusedFileDesc
+\end{itemize}
+
+\subsection{Pseudo-code}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{namePtr, create}
+\KwOut{fd}
+\If{ununsedFileDesc is empty}{
+\Return ~-1
+}
+get file name from virtual memory using namePtr\;
+\If{name is null}{\Return ~-1}
+let file to be fileSystem.open parameterized by name and create\;
+\If{file is null}{\Return ~-1}
+pop the top fd from unusedFileDesc\;
+mark openedFile[id] to be file\;
+\Return fd
+\caption{UserProcess::handleOpen}
+\label{algo:open}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{fd, bufferPtr, count}
+\KwOut{res}
+\If{fd $<$ 0 or fd $>$ 15 or count $<$ 0 }{\Return ~-1}
+\If{openedFiles[fd] is null}{\Return~-1}
+initialize a buffer of size count\;
+read count bytes to buffer from openedFiles[fd]\;
+\If{res == -1}{\Return~-1}
+write the content of buffer to bufferPtr\;
+\If{number of bytes written is less than number of bytes read}{\Return ~-1}
+\Return res
+\caption{UserProcess::handleRead}
+\label{algo:read}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{fd, bufferPtr, count}
+\KwOut{res}
+\If{fd $<$ 0 or fd $>$ 15 or count $<$ 0 }{\Return ~-1}
+\If{openedFiles[fd] is null}{\Return~-1}
+initialize a buffer of size count\;
+read count bytes to buffer from bufferPtr\;
+\If{res == -1}{\Return~-1}
+write the content of buffer to openedFiles[fd]\;
+\If{number of bytes written is less than number of bytes read}{\Return ~-1}
+\Return res
+\caption{UserProcess::handleWrite}
+\label{algo:write}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{fd}
+\KwOut{0}
+\If{fd $<$ 0 or fd $>$ 15 or count $<$ 0 }{\Return ~-1}
+\If{openedFiles[fd] is null}{\Return~-1}
+close openedFiles[fd]\;
+set openedFiles[fd] to be null;
+push the fd to unusedFileDesc\;
+\Return~ 0;
+\caption{UserProcess::handleClose}
+\label{algo:close}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{namePtr}
+\KwOut{0 or -1}
+get name from vrtual memory using namePtr\;
+\If{name == null}{\Return ~-1}
+remove name from file system\;
+\If{remove succeeded}{\Return ~0}
+\Else{\Return~-1;}
+\caption{UserProcess::handleUnlink}
+\label{algo:unlink}
+\end{algorithm}
+
+\subsection{Correctness constraints}
+\begin{itemize}
+\item No system call can raise an exception in the kernel.
+\item halt() can only be invoked by `root' process (for task 3).
+\item System calls return -1 when error, else return as indicated in syscall.h .
+\item File descriptor 0, 1 initially is for standard input and output, but user process can close these descriptors.
+\item If open() returns a OpenFile, then it can be accessed by user process.
+\item Each process can open up to 16 concurrent files, each with a unique file descriptor. A file descriptor can be reused if the associated file is closed.
+\end{itemize}
+
+\subsection{Test strategy}
+\begin{itemize}
+\item Create a new file, then close it. Open the file, write something into it, then read it out, close it. Delete it at last. Test whether all the system calls are operating normally.
+\item Try to open a non-existent file, see what will happen.
+\item Open up to 14 files in one process, test whether function well, test whether the 0 and 1 are for standard input and output seperately. Close them one by one, check whether the file descriptors are released timely.
+\item Try to open up to 15 files (standard input and output not included), see what will happen.
+\item Make sure that no exceptions are thrown during all above.
+\end{itemize}
+
+\subsection{Test cases}
+\begin{itemize}
+\item creat\_test: first open up to 14 files, then based on our implementation, the file descriptors 15, 14, $\dots$, 2 are returned in order. For 1 and 0 are reserved for standard output and standard error, so another create will cause an error, return -1.
+\item open\_close\_test: we open a non-existent file, error occurred and -1 returned. Then we create a non-existent file, no file found so it created a new one, file descriptor 15 returned. Then we open the existing file, another file descriptor 14 returned. We close this file, succeeded and returned 0. We close this again, error occurred and -1 returned.
+\item write\_read\_test: we create a file and write 5 bytes into it, then it returns 5. We then read from it immediately, the operation returns 0. We close and open the file, read 5 bytes from it, return 5. The file has been read up, we read it still, so it will return 0. Also, we write and read from invalid file descriptor, it will return -1.
+\item unlink\_test: we create a file and open it. We unlink it once and it will return 0, then unlink it twice and it will return 0 again. Then we create the same file, it should return -1 since it has been unlinked. Afterwards, we close one of the file descriptors, notice that the file still exists by now. Then we close another one, so that the file will be deleted soon. We open it again and it will return -1. We create one and close, successfully unlink it and it returns 0. We unlink it for the second time and it will return -1.
+\end{itemize}
+
+\section{Multiprogramming}
+
+\subsection{Design}
+
+We allocate pages for a new process and initialize the pageTable of that process when loadSection() is called. When we use virtual address, we first use the pageTable of the current process to translate it into physical address use getPPN(). Therefore, we can use it to implement read and write process.
+
+\subsection{Variables and functions}
+
+\begin{itemize}
+\item unusedPPN: public static Stack$\langle$Integer$\rangle$ in userkernel, save the unused ppn and it can be allocated to every process.
+
+\item unusedPPNLock: lock the unusedPPN.
+
+\item UserProcess::getPPN(int vpn, bool write): input a vpn, use it to get the ppn and return ppn. If write is true but the ppn is readonly then return -1.
+
+\item UserProcess::readVirtualMemory(): input vpn, translate it into ppn, then load the memory into data using the ppn.
+
+\item UserProcess::writeVirtualMemory(): input vpn, translate it into ppn, then wirte the data into memory using the ppn.
+
+\item UserProcess::loadSections():initialize the pagetable. First get the pagesize of the process, then map every vpn into ppn using the unusedppn in userkernel and save it in the pagetable.
+
+\item UserProcess::unloadSections():free the ppn. Push it into unusedppn.
+
+\item UserKernel::initialize(): add the code to initialize the unusedPPN and unusedPPNLock.
+\end{itemize}
+\subsection{Pseudo-code}
+
+\begin{algorithm}
+\caption{UserProcess::getPPN(vpn, write)}
+\KwIn{vpn, write}
+\KwOut{ppn}
+ \If{vpn $<$ 0 or vpn $>=$ numpages}
+      {
+           return -1\;
+      }
+get entry from pageTable according to vpn\;
+use entry to get ppn\;
+ \If{write and the page is readonly}
+      {
+           return -1\;
+      }
+return ppn\;
+\end{algorithm}
+
+\begin{algorithm}
+\caption{UserProcess::readVirtualMemory(vaddr, data, offset, length)}
+\KwIn{vaddr, data, offset, length}
+get memory from Machine and convert vaddr into vpn and pageOffset\;
+ppn = getPPN(vpn, false)\;
+ \If{ppn $<$ 0}
+      {
+           return 0\;
+      }
+use ppn and pageOffset to get the address paddr\;
+res = min(length, pagesize - pageOffset)\;
+copy res bytes of memory (at address paddr) into data (beginning at position offset)\;
+ \While{hasn't copied length bytes of memory}
+ {
+    vpn++\;
+    ppn = getPPN(vpn, false)\;
+     \If{ppn $<$ 0}
+      {
+           return res\;
+      }
+    use ppn and pageOffset = 0 to get the address paddr\;
+    amount = min(length - res, pageSize)\;
+   copy amount bytes of memory (at address paddr) into data (beginning at position (offset + res))\;
+   res = res + amount\;
+ }
+
+return res\;
+\end{algorithm}
+
+\begin{algorithm}
+\caption{UserProcess::writeVirtualMemory(vaddr, data, offset, length)}
+\KwIn{vaddr, data, offset, length}
+get memory from Machine and convert vaddr into vpn and pageOffset\;
+ppn = getPPN(vpn, false)\;
+ \If{ppn $<$ 0}
+      {
+           return 0\;
+      }
+use ppn and pageOffset to get the address paddr\;
+res = min(length, pagesize - pageOffset)\;
+copy res bytes of data (beginning at position offset) into memory (at address paddr)\;
+ \While{hasn't copied length bytes of memory}
+ {
+    vpn++\;
+    ppn = getPPN(vpn, false)\;
+     \If{ppn $<$ 0}
+      {
+           return res\;
+      }
+    use ppn and pageOffset = 0 to get the address paddr\;
+    amount = min(length - res, pageSize)\;
+    copy amount bytes of data (beginning at position (offset + res)) into memory (at address paddr)\;
+    res = res + amount\;
+ }
+
+return res\;
+\end{algorithm}
+
+\begin{algorithm}
+\caption{UserProcess::loadSections()}
+require lock\;
+
+ \If{numPages $>$ the number of pages remain in memory}
+      {
+           release the lock and close the coff\;
+           return false\;
+      }
+\For{s = 0; s $<$ number of sections; s++}
+{
+     get the coff section\;
+     \For{i = 0; s $<$ section's length; i++}
+     {
+         vpn = section.getFirstVPN() + i\;
+         get an unused ppn from UserKernel\;
+         initialize the pageTable[vpn] with vpn and ppn\;
+         loadpage()\;
+     }
+}
+
+\For{i = 0; i $<$ numpages; i++}
+{
+     \If {pageTable[i] is not defined}
+     {
+          get an unused ppn from UserKernel\;
+          initialize the pageTable[i] with i and ppn\;
+     }
+}
+release the lock\;
+
+return true\;
+\end{algorithm}
+
+\begin{algorithm}
+\caption{UserProcess::unloadSections()}
+require lock\;
+
+return all the ppn it used to UserKernel\;
+
+release the lock\;
+
+\end{algorithm}
+
+\begin{algorithm}
+\caption{UserKernel::initialize()}
+
+......\;
+
+get the phsical page number g from the mechine.
+
+push 0 to g into unusedPPN\;
+
+\end{algorithm}
+
+
+\subsection{Correctness constraints}
+
+\begin{itemize}
+\item When a process loads successfully, it will get enough pages to use.
+\item Different process will use different phsical address.
+\item When a process exits, it should release all physical pages allocated to it so that those pages can be allocated to other processes.
+\end{itemize}
+
+
+\subsection{Test strategy}
+
+\begin{itemize}
+\item Run program which use lots of memory to check whether it allocated correctly.
+\item Run multiple user processes to check whether the memory will overlap.
+\end{itemize}
+
+\subsection{Test cases}
+\begin{itemize}
+\item memory\_test.coff is used to call itself, to test whether the memory is insufficient, by result, insufficient physical memory.
+\item mfree\_test(2).coff is used to allocate memory then free them for many times, to test whether memory is freed.
+\end{itemize}
+
+\section{System calls for process management (exec, join, exit, halt)}
+
+\subsection{Design}
+Since only the first process can call halt(), so we need a int field to indicate the process id(the smaller the earlier). Use numCreated to denote the number of processes created so far to generate an id for the new one.
+
+Use numRunning to denote the number of processes running in order to call terminate timely. In order to change them synchronized, we also dispatch a lock to them each.
+
+Use a new field exitStatus to denote the exit status.
+
+Use a UserProcess parent to record the parent of it.
+
+Use UThread thread to denote the thread the machine actually runs.
+
+Use exception to record whether the process exits abnormal.
+
+Use a map between id and Process processTable to record the child processes of this, in case join will be called. Also there is a lock associated.
+\subsection{Variables and functions}
+\begin{itemize}
+\item int handleExit(int status)
+\item int handleJoin(int processId, int statusPtr)
+\item int handleExec(int filePtr, int argc, int argvPtr)
+\item int handleHalt()
+\item boolean execute(String name, String[] args)
+\end{itemize}
+
+\begin{itemize}
+\item int id
+\item int exitStatus
+\item UserProcess parent
+\item UThread thread
+\item boolean exception
+\item int numCreated
+\item Lock numCreatedlock
+\item int numRunning
+\item Lock numRunninglock
+\item Map$\langle$Integer, UserProcess$\rangle$ processTable
+\item Lock processTablelock
+\end{itemize}
+
+\subsection{Pseudo-code}
+
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{None}
+\KwOut{0 or -1}
+\If{the calling process id is not 0}{\Return ~-1}
+halt the machine\;
+check whether the machine is halted by Lib.assert\;
+\Return 0;
+\caption{UserProcess::handleHalt}
+\label{algo:halt}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{filePtr, argc, argvPtr}
+\KwOut{child.id or -1}
+get file name from virtual memory using filePtr\;
+\If{name is null}{\Return ~-1}
+new String array of length argc\;
+\For{ i=0; $i<argc$; i++}{
+initialize a buffer of size 4\;
+load ith argument to buffer from virtual memory\;
+\If{load failed}{\Return ~-1}
+load that from buffer to args[i]\;
+\If{load failed}{\Return ~-1}
+}
+create a new process child\;
+set this process as the parent of new process\;
+call execute(name, args)\;
+\If{call failed}{\Return~-1}
+\Return ~child.id
+\caption{UserProcess::handleExec}
+\label{algo:exec}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{name, args}
+\KwOut{true or false}
+load the name and args into this process\;
+\If{load failed}{\Return false}
+acquire numRunningLock\;
+increase numRunning\;
+release numRunningLock\;
+create a new thread based on this process\;
+fork the thread to run\;
+\Return true;
+\caption{UserProcess::execute}
+\label{algo:execute}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{processID, statusPtr}
+
+acquire processTableLock\;
+get the child process using processID\;
+release processTableLock\;
+
+\If{child == null or child.parent != this}{ return -1\;}
+
+child.thread.join()\;
+child.parent = null\;
+
+copy the exitStatus into statusPtr\;
+
+return child.exception ? 0 : 1\;
+
+\caption{UserProcess::handleJoin}
+\label{algo:join}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon
+\KwIn{status}
+\KwOut{0}
+\For{all opened file f in openedFiles}{
+\If{f is not null}{
+close f}
+}
+release the resources taken up by the process\;
+set the exitStatus to be status\;
+acquire numRunningLock\;
+decrease numRunning\;
+\If{numRunning is 0}{terminate the kernel}
+release numRunningLock\;
+finish this process\;
+check it is successfully finished by calling Lib.assert\;
+\Return 0;
+\caption{UserProcess::handleExit}
+\label{algo:exit}
+\end{algorithm}
+
+
+
+\subsection{Correctness constraints}
+\begin{itemize}
+\item No system call can raise an exception in the kernel.
+\item Only the root process whose id is 0 can call Machine.halt().
+\item A process can only join its child process.
+\item Every process should have an unique process id.
+\item When a process exits, it should clean up any state associates with it.
+\item The last process will call terminate().
+\end{itemize}
+
+\subsection{Test strategy}
+
+\begin{itemize}
+\item Run a process to execute processes and join them. Test the execute() and join() and whether the last process will call terminate().
+\item Run a process to join a process which is not its child and check whether it will return -1.
+\item Run several processes and exit them normal or abnormal and check whether them clean up all the associate state.
+\item Run several processes and call halt() to check whether only the root process can call halt().
+\end{itemize}
+
+\subsection{Test cases}
+
+\begin{itemize}
+\item join\_exec(2,3).coff is used to test whether exec() is correct, and 2.coff exits normally, j\_c's join() return 1; 3.coff exits for divided by zero, so j\_c's join() return 0; and r fother non-child processID, return -1; also test join 2.coff twice, return -1.
+\item exit\_m(s).coff is used to test whether exit() is correct, m.coff join s.coff, where pass argv to s.coff, then s.coff exit(param), then we check m's join()'s status is equal to param or not.
+\item halt\_test(2).coff is used to test whether halt() is correct, the code is based on exit\_m(s).coff, we add halt() in 2.coff, check its return is -1, and add halt() in h\_t.coff, check nachos halting.
+\end{itemize}
+
+
+\section{Lottery Scheduler}
+
+\subsection{Design}
+Based on original PriorityScheduler, we extends it into LotteryScheduler, with modified pickNextThread() function by using random function to implement lottery, modified Donation() function by using collect all tickets priority.
+\subsection{Variables and functions}
+\begin{itemize}
+\item LotteryScheduler extends PriorityScheduler;
+\item LotteryQueue extends ThreadQueue;
+\item ThreadState extends PriorityScheduler.ThreadState;
+\item LotteryQueue.waitQueue; HashSet of $\langle$ThreadState, Integer$\rangle$; (use iterator to pick)
+\item LotteryQueue.sum; sum of all tickets;
+\item ThreadState.waitQueue; LinkedList of $\langle$LotteryQueue$\rangle$; (use iterator to donate)
+\end{itemize}
+\subsection{Pseudo-code}
+%
+%\begin{algorithm}
+%\caption{LotteryScheduler.increasePriority()}
+%disable interrupt\;
+%thread$\leftarrow$currentThread\;
+%enable interrupt\;
+%\end{algorithm}
+%
+\begin{algorithm}
+\caption{LotteryQueue.pickNextThread()}
+total $\leftarrow 0$\;
+\If{waitQueue.size $=0$}{return null\;}
+num $\leftarrow$ random().nextInt(TicketsSum+1)\;
+\While{num $>$ total \&\& waitQueue.hasNext()}{result $\leftarrow$ waitQueue.next()\; total += waitQueue.get(result).tickets\;}
+return result\;
+\end{algorithm}
+
+\begin{algorithm}
+\caption{ThreadState.Donation()}
+disable interrupt\;
+sum $\leftarrow$ priority\;
+\For{any owned LotteryQueue lq}{
+queueSum $\leftarrow$ lq.getSum()\;
+\If{Integer.MAX\_VALUE $-$ sum $<$ queueSum}{return Integer.MAX\_VALUE\;}
+sum += queueSum\;
+}
+enable interrupt\;
+return sum\;
+\end{algorithm}
+\subsection{Correctness constraints}
+\begin{itemize}
+\item \#Tickets can be very large, and not exceed to MAX\_VALUE;
+\item Effective priority should be sum of all donated tickets plus its own.
+\end{itemize}
+
+\subsection{Test strategy}
+\begin{itemize}
+\item Test whether probability distribution is right;
+\item Test situation sum of tickets exceeding MAX\_VALUE;
+\item Test small number scheduler without donation;
+\item Test large number scheduler without donation;
+\item Test small number scheduler with donation;
+\item Test large number scheduler with donation;
+\end{itemize}
+
+\subsection{Test cases}
+The test is in selfTest() in LotteryScheduler.
+\begin{itemize}
+\item Case 1: Create several threads waiting for the same lock carried by the main process. We can check whether the probability distribution is right.
+\item Case 2: Create several threads waiting for the same lock carried by the main thread. We can compare the ticket number of the main process before and after the threads wait for the lock and the ticket number of the the thread which gets the lock. We can check whether the donation works.
+\item Case 3: Create several threads waiting for different lock all carried by the main process. And we release the locks in sequence and check the ticket number of the main process. We can test whether a thread will retrun the tickets when you release a lock.
+\item Case 4: Create threads in sequence, each get a lock and then wait the lock hold by the previous thread. Check whether the mutiple donation works.
+
+
+\end{itemize}
+
+
+\end{document}

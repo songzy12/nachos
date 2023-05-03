@@ -1,0 +1,490 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{epsfig}
+\usepackage[linesnumbered,ruled,vlined]{algorithm2e}
+\title{Project 1 Final Design Document}
+\author{Fang Zhang,\\
+Qiushi Huang,\\
+Zhengyang Song,\\
+Zhaopeng Yan
+}
+
+\begin{document}
+
+\maketitle
+
+Notice: the different part of initial and final design document has been processed automatically by command \emph{latexdiff}, which leads to green lines between the different parts. Also, we have a new section named \emph{Test Cases} to describe all the test cases we have implemented so far.
+
+\section{Join}
+
+\subsection{Design}
+
+When a thread A calls B.join(), to wait B finishes, it adds itself to B's waitqueue and sleeps. After B finishes, B will wake up all the threads in the waitqueue so that they can continue running.
+
+\subsection{Variables and functions}
+
+1.KThread::waitqueue: private variable in KThread, save the threads which are waiting the thread to finish.
+
+2.KThread::join(): When the current thread wants to wait another thread B to finish, it will call B.join. The function will add the current thread to the thread's waitqueue and sleep if the thread doesn't finish.
+
+3.KThread::finish(): when a thread finishes, it will call this function to wake up all the threads waiting it. It will let the threads in waitqueue call ready() to add to the ready queue.
+
+\subsection{Pseudo-code}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+disable interrupt\;
+\If{this.statues $\neq$ statusFinished}{
+  add current thread to waitqueue\;
+ sleep()\;
+}
+restore interrupt\;
+\caption{KThread::join}
+\label{algo:change}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+the same as the existing code\;
+\If{waitqueue isn't empty}{
+ \For{every thread i in waitqueue} {
+  i.ready()\;
+}
+}
+sleep()
+\caption{KThread::finish}
+\label{algo:change}
+\end{algorithm}
+
+\subsection{Correctness constraints}
+
+1.If A joins B, A will never be scheduled before B finished.
+
+2.If A joins B, A will continue running after B finished.
+
+\subsection{test strategy}
+
+1. Fork a thread which output when it begins and ends and let the current thread join it. Test whether the join function works.
+
+2. Fork several threads and each thread joins the thread forked before it. Test whether the join works when there are threads join each other.
+
+3. Fork a thread and let the current thread fork it two times. Test whether when a thread joins a thread which is already finished can work.
+
+\section{Condition variable}
+
+\subsection {Design}
+
+We need to implement sleep(), wake() and wakeAll() methods for this question. For we are forbidden to use semaphore as what has been done in Condition.java. We need to find another way around.
+
+To do this, we also need a waitQueue to record all the threads that are waiting this condition variable by now. Rather than placing a corresponding semaphore in the queue, we put the corresponding thread itself.
+
+\subsection{Variables and functions}
+For waitAll(), it is just all the same as before. We call wake() for all the elements in the wait queue. Notice that we need to disable interrupt before and enable interrupt after.
+
+For sleep(), we just put the current thread to the waitQueue, and make it sleep. In order to guarantee atomic condition, we disable interrupt and acquire the lock before operation while release the lock and enable interrupt after operation.(order matters)
+
+For wake(), we examine whether the waitQueue is empty. If not, just remove the first thread from waitQueue and put it into the readyQueue. Note that before the operation we disable the interrupt before and enable the interrupt after.
+\subsection {Pseudo-code}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+disable interrupt\;
+release the lock\;
+add current thread to wait queue\;
+make current thread sleep\;
+acquire the lock\;
+enable interrupt
+\caption{Condition::sleep}
+\label{algo:sleep}
+\end{algorithm}
+
+\begin{algorithm}
+\If {wait queue is not empty}{
+ disable interrupt\;
+ remove first element\;
+ put it into ready queue\;
+ enable interrupt
+}
+\caption{Condition::wake}
+\end{algorithm}
+
+\begin{algorithm}
+disable interrupt\;
+\While{wait queue not empty}{
+wake()
+}
+enable interrupt\;
+\caption{Condition::wakeAll}
+\end{algorithm}
+\subsection{Correctness Constrains}
+\begin{itemize}
+\item For any time, only one thread is running
+\item When one thread sleeps, it will not wake until some thread wakes it
+\end{itemize}
+
+\subsection {Test strategy}
+\begin{itemize}
+\item init a lock, and init a condition variable using the lock
+\item fork several thread, call sleep() for all, test whether all threads go to sleep
+\item call wake() to test whether one of the sleeping threads will awake
+\item call wakeAll() to test whether all the sleeping threads will awake
+\end{itemize}
+
+\section{Alarm}
+
+\subsection {Design}
+
+We need to overwrite the waitUntil(long x) method in the Alarm class with no busy waiting strategy. The aim of this method is to suspend the execution until time has been now+x. When the time is right, we just put it into the ready queue rather than let it run immediately.
+
+So we can add a wait queue to Alarm class, every time waitUntil is called, we just compute the corresponding wake time of that thread, and put the thread together with the wake time into the wait queue(To realize this, we make a new class named AlarmedThread, this is also comparable in order to use PriorityQueue based on the timeToWake). Then let the thread sleep(before and after we disable and enable interrupt). Whenever there is a timer interrupt, we check the wait queue to see whether there is any thread is due(Using PriorityQueue, we just exam the first thread). If so, we just put it into the ready queue.
+
+\subsection {Pseudo-code}
+
+\begin{algorithm}
+disable interrupt
+get current time\;
+\For{ i in wait queue}{
+\If{ wake time of i >= current time}{
+put i into ready queue
+}
+enable interrupt
+}
+\caption{Alarm::timerInterrupt}
+\end{algorithm}
+
+\begin{algorithm}
+get current time\;
+wake time = current time + x\;
+new AlarmedThread using parameter of current thread and time to wake
+put the AlarmedThread into wait queue\;
+make current thread sleep
+\caption{Alarm::waitUntil(x)}
+\end{algorithm}
+\subsection{Correctness Constrains}
+\begin{itemize}
+\item The thread will not run until wake time
+\item When it beyonds the wake time, the thread will be woken eventually
+\end{itemize}
+
+\subsection {Test strategy}
+\begin{itemize}
+\item fork several threads, and assign different x towards function waitUntil
+\item test whether all the threads waits at least x time and then wake up
+\end{itemize}
+\section{Communicator}
+\subsection{Design}
+
+We need to implement the Communicator() constructor, speak() for speakers and listen() for listeners.
+\subsection{Variables and functions}
+For Communicator(), we just need to initialize all the class members.
+
+For listen(), we first acquire a lock, then check whether there is a word ready, if not, wake up a speaker and goes to sleep. When there is a word ready, it receive the word and mark it unready. Finally we release the lock.
+
+For speaker(), we also acquire a lock, check whether there is no listener or whether there is a ready word, if so, we go to sleep. When there is listener and no word ready, we say a word and mark the corresponding flag, wake up all the listener. Finally we release the lock.
+
+Notice that we use a word$\_$ready flag to indicate whether there is a ready word, use num$\_$listener and num$\_$speaker to make the check easier. The wake and sleep operations are realized by two condition variables using the same lock.
+\subsection {Variables and functions}
+\begin{itemize}
+\item num$\_$listener: number of listeners
+\item num$\_$speaker: number of speakers
+\item word$\_$ready: indicate whether word is ready
+\item cond$\_$listener: condition variable for listeners
+\item cond$\_$speaker: condition variable for speakers
+\item word: the current word can be heared
+\end{itemize}
+\subsection {Pseudo-code}
+\begin{algorithm}
+$num_listener \gets 0$\;
+$num_speaker \gets 0$\;
+$word\_ready \gets false$\;
+$word \gets ""$\;
+init a lock\;
+init cond$\_$listener and cond$\_$speaker with the same lock\;
+\caption{Communicator::Communicator}
+\end{algorithm}
+
+\begin{algorithm}
+
+acquire the lock\;
+$num\_speaker \gets num\_speaker+1$\;
+\While{ num$\_$listener is 0 or word$\_$ready is true}{
+ go to sleep}
+$word \gets word ~of~ current~ thread$\;
+$word\_ready \gets true$\;
+wake a listener\;
+sleep\;
+$num\_speaker\gets num\_speaker-1$;\;
+release the lock\;
+\caption{Communicator::speak}
+\end{algorithm}
+
+\begin{algorithm}
+
+acquire the lock\;
+$num\_listener\gets num\_listener+1$\;
+\While{ word$\_$ready is false}{
+wake up the speaker\;
+go to sleep
+}
+get the word\;
+$ word\_ready\gets false$\;
+wake up all speakers\;
+$ num\_listener\gets num\_listener-1$\;
+release the lock
+\caption{Communicator::listen}
+\end{algorithm}
+
+\subsection{Correctness Constrains}
+\begin{itemize}
+\item If there are more than one listener and one speaker, then there will be a thread that are not blocked.
+\item If a speaker thread finished, then his word is heard and only head once
+\item If a listener thread finished, then he heard and only heard a word once
+\end{itemize}
+\subsection {Test Strategy}
+\begin{itemize}
+\item less listener than speaker
+\item less speaker than listener
+\end{itemize}
+For all the above cases, see whether the result is normal
+\section{Priority scheduling}
+
+
+\subsection{Design}
+
+To implement the priorityscheduler, we only need to implement the threadstate class and priorityqueue class in priorityscheduler. We set two variables in threadstate: priority and effective.When we want to get priority or effectivepriority, we will return priority and effective.  And we set a variable in priorityqueue to record the thread for which the queue is waiting. Then we  create an interface setEffectivePriority() to set effective. Every time a new thread add to the queue, it will donate it's priority to it using setEffectivePriority(). Since when a thread's effectivepriority changes, it will affect the priority of the thread it waits, which means it must also call setEffectivePriority() from the threads it waits until the thread doesn't wait. To know what threads it is waiting, we can set a variable in KThread to record the waitqueue the thread is in. Notice that in task 1, if the waitqueue is priorityqueue, it can also donate priority.
+
+\subsection{Variables and Functions}
+
+\begin{itemize}
+\item
+effective: protected variable in threadstate, save the effective priority of the associated thread.
+\item
+waitedthread: public variable in priorityQueue, save the thread that the threads in the queue is waiting for.
+\item
+waitqueue: private variable in priorityQueue, save the waiting thread in priority queue.
+\item
+waitingqueue: public variable in KThread, save the queue the thread is in. If the thread does't wait for any thread, the waitingqueue should be null.
+\item
+threadstate::setEffectivePriority(): When a thread wants to donate priority, it will call this function. We first compare the setting value to the original effective, if it's smaller, do nothing; else, set effective to be the setting value and call seteffectivepriority() in the thread it is waiting for.
+\item
+threadstate::getEffectivePriority(): It will return the effective priority of the associated thread by returning effective.
+\item
+threadstate::waitForAccess():  When a thread is added to the queue to wait, it will call this function. It will enqueue the thread to waitqueue and donate priority to the waitedthread by calling seteffectivepriority and it will set it's waitingqueue the the priority queue since it's in it.
+\item
+threadstate::acquire(): If a thread doesn't need to wait for access in the queue, it will call this function. It will set the waitedthread to the current thread. After waitedthread is not null, it will not call this function.
+\item
+priorityqueue::nextThread(): It will return one thread in the queue which has the highest priority. If the queue is empty, it will return null. Since the thread in the queue is now waiting for the return thread, the waitedthread is set to the return thread. And the return thread is no longer waiting, the waitingqueue is set to null and the effective priority of the previous thread is reset to priority.
+\item
+threadstate::resetpriority(): reset effective priority.
+\end{itemize}
+
+\subsection{Pseudo-code}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+\KwIn{priority}
+\If{$priority > effective$} {
+    effective = priority\;
+    \If{thread.waitingqueue.waitedthread $\neq$ null}
+    {
+       getThreadState(thread.waitingqueue.waitedthread).seteffectivepriority(priority)\;
+    }
+  }
+\caption{threadstate::setEffectivePriority()}
+\label{algo:max}
+\end{algorithm}
+
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+\Return{effective}\;
+\caption{threadstate::getEffectivePriority()}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+waitQueue.add(thread)\;
+getThreadState(waitQueue.waitedthread).setEffectivePriority(getPriority(this))\;
+this$->$waitingqueue = waitQueue\;
+\caption{threadstate::waitForAccess(waitQueue)}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+\If{waitqueue.isempty()} {
+    getThreadState(waitedthread).resetpriority()\;
+    waitedthread = null\;
+    return null\;  }
+\Else{
+   Find the thread A in waitqueue such that the effective priority is highest.(If multiple threads with the same highest priority are waiting, choose the one that has been waiting in the queue the longest)
+   A.waitingqueue = null\;
+   getThreadState(waitedthread).resetpriority()\;
+   waitedthread = A\;
+}
+\caption{priorityqueue::nextThread()}
+\end{algorithm}
+
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+waitQueue.waitedthread = current thread\;
+\caption{threadstate::acquire(waitQueue)}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+effective = priority\;
+\caption{threadstate::resetpriority()}
+\end{algorithm}
+
+\subsection{Correctness constraints}
+
+1. The effective priority of a thread is larger than or equal to the effective priority of all the threads which is waiting for it directly or indirectly.
+
+\subsection{test strategy}
+
+1. fork several threads with locks, each thread holds a lock and waits the previous thread's lock, test whether the donation works.
+
+2. fork several threads, set some of them with high priority and some of them with low priority and all waiting for some locks, test whether the threads with high priority will finish first.
+
+
+\section{Boat Grader}
+
+\subsection {Design}
+Notice that if we ensure 3 properpties below, then all the people will finally get to Molokai:
+\begin{enumerate}
+\item every time, boat to Molokai is full: it will catch 1 adult or 2 children, not only one child.
+\item every time, on boat back Oahu, there is only one child.
+\item the boat won't stuck: there always appropriate people to put on boat for above two situations.
+\end{enumerate}
+Brief proof is that: suppose 1 adult is 100kg and 1 child is 50kg, then by porperties 1 and 2, there is 50kg weight-down of total weight of Oahu after every round trip, since the boat never stuck, total weight of Oahu will down to 0, i.e. they will finally all get to Molokai.\\
+For ensuring above properties, we assume there are at least two children. From above analysis, we find that children play a role piloting boat back Oahu, and adult never return, so we decide to send children first, which is the idea our algorithm design originated.
+\subsection{Variables and functions}
+\begin{itemize}
+\item BoatLocation: Oahu or Molokai;(global variable)
+\item Location: for each thread, keep in track where the person is;(local variable)
+\item BoatLock: a lock for protecting action to boat;
+\item WaitOahu: condition variable based BoatLock, for people waiting on Oahu;
+\item WaitMolokai: condition variable based BoatLock, for people waiting on Molokai;
+\item WaitFull: condition variable based BoatLock, for to get two children on boat;
+\item Weight: weight of people on boat;(50kg for 1 child, 100kg for 1 adult)
+\item Total: number of all people;(variable for main thread)
+\item OnMolokai: number of people on Molokai;(variable for main thread)
+\item ChOahu: number of children on Oahu;(global variable for Oahu people)
+\item AuOahu: number of adults on Oahu;(for final child decide whether come back)
+\end{itemize}
+\subsection {Pseudo-code}
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+fork adult and child threads\;
+listen OnMolokai until which equal to Total\;
+\caption{Boat::begin}
+\label{algo:change}
+\end{algorithm}
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+\While{true}{
+acquire BoatLock\;
+\If{Location$=$Oahu}{
+\While{BoatLocation$\neq$Oahu $||$ Weight$=100$ $||$ ChOahu$=1$}{WaitOahu.sleep\;}
+waitOahu.wakeall\;
+\If{Weight$=0$}{
+BOOL fi = (AuOahu$=0$ \&\& ChOahu$=2$)\;
+Weight$+=50$\;
+WaitFull.sleep\;
+bg.ChildRideToMolokai\;
+Location$:=$Molokai\;
+OnMolokai$+=1$\;
+\If{fi$=$true}{WaitMolokai.sleep\;}
+}
+\Else{Weight$+=50$\;
+bg.ChildRowToMolokai\;
+WaitFull.wake\;
+ChOahu$-=2$\;
+BoatLocation$:=$Molokai\;
+Location$:=$Molokai\;
+OnMolokai$+=1$\;
+Weight$-=100$\;
+WaitMolokai.sleep\;
+}
+}
+\Else{
+Weight$+=50$\;
+OnMolokai$-=1$\;
+BoatLocation$:=$Oahu\;
+Location$:=$Oahu\;
+Weight$-=50$\;
+ChOahu$+=1$\;
+WaitOahu.wakeall\;
+}
+release BoatLock\;
+}
+\caption{Boat::ChildItinerary}
+\label{algo:change}
+\end{algorithm}
+
+\begin{algorithm}
+\DontPrintSemicolon % Some LaTeX compilers require you to use \dontprintsemicolon instead
+acquire BoatLock\;
+\If{Location=Oahu}{
+    \While{BoatLocation$\neq$Oahu $||$ Weight$=100$ $||$ ChOahu$>1$}{
+    WaitOahu.sleep\;
+    }
+    Weight$+=100$\;
+    AuOahu$-=1$\;
+    bg.AdultRowToMolokai\;
+    BoatLocation$:=$Molokai\;
+    Location$:=$Molokai\;
+    OnMolokai$+=1$\;
+    Weight$-=100$\;
+    WaitMolokai.wakeall\;
+    WaitMolokai.sleep\;
+}
+\Else{WaitMolokai.sleep\;}
+release BoatLock\;
+\caption{Boat::AdultItinerary}
+\label{algo:change}
+\end{algorithm}
+\subsection {Testing}
+test(0,2,b), (0,10,b) , (10,2,b) , (10,10,b).
+
+\section{Test Cases}
+\subsection{Join}
+The test is called selfTest in file KThread.java. We can just call KThread.selfTest() in ThreadedKernel to run it. selfTest() contains two parts, Ping Test used to see whether it can finally runs normally independently, and Join Test to see whether one thread can wait for the other as expected.
+
+In the function selfTest() we first see whether two threads can yeild to each other for a given times. Then we fork several threads, and see whether they can process as the order indicated by the join command.
+\subsection{Condition Varaible}
+
+The test is called selfTest() in file Condition2.java. We can just call Condition2.selfTest() in ThreadedKernel to run it. The purpose is to test whether sleep(), wake() and wakeAll() will function normally.
+
+We just initialize a lock and initialize a condition variable corresponded. New an array of threads using the same lock and condition variable. Then fork all them. In each thread, once they aquire the lock, they just sleep waiting for the condition variable. Then we call wake in the test code, wait to see whether one thread will be woken. Then call wakeAll in the test code, wait to see whether all the threads will be woken.
+\subsection{Alarm}
+
+The test is called selfTest() in file Alarm.java. We can just call Alarm.selfTest() in ThreadedKernel to run it. The purpose is to test whether waitUntil() will function normally.
+
+We just new a runnable thread, where we new an array of threads. We assign different wait time to them, and compare the intended time and the actual time to see whether the formor is less or equal to the latter.
+
+\subsection{Communicator}
+
+The test is called selfTest() in file Communicator.java. We can just call Communicator.selfTest() in ThreadedKernel to run it. The purpose os to test whether Communicator will function normally under all kinds of circumstances.
+
+We implemented a function named Test(s, l) to test the case when there are s speakers and l listeners. Then in the selfTest() function, we called Test(3,5), Test(5,3), Test(4,1),Test(1,3), Test(4,4) to test the cases when there are more speakers than listeners, more listeners than speakers, only 1 speaker, only 1 listener, and equal number of listeners and speakers.
+
+In function Test(s,l) we just initialize s speaker threads and l listener threads, then fork them all one by one. If the speakers are less than listeners, we wait for the speakers to terminate and then exit. Otherwise we wait for the listeners to terminate and then exit.
+\subsection{Priority Schduling}
+
+1.  selfTest 1: Fork several threads sleep a long time until the main thread get a lock. Then all the threads will acquire the lock before the main thread release it. So the threads will get the lock following the priority. We can test whether the priority queue works.
+
+2. selfTest 2,3: Fork threads with priority 0 to 7 which run a long time. Then we can create some testing thread wait for another thread with different priorities. We can check whether the testing threads finish with the right effective priority (Since threads with priority 0 to 7 running a long time, and we know when it finishes.)
+
+3.  selfTest 4: let the main thread join the thread 0,1 with priority 0 and 1 when threads 0 and 1 create with different order. Check which threads finish first to test whether the first thread finishes first.
+\subsection{Boat Grader}
+Call Boat.selfTest() in ThreadedKernel;
+\begin{itemize}
+\item (0,2,b) is two children case, which is the case with minimal number of people, also should be the final step of every situation.
+\item (0,10,b) is the situation only children, but more than two.
+\item (10,2,b) is the situation with least number of children, and with adults.
+\item (10,10,b) is the situation with many adults and more than two children.
+\end{itemize}
+so, by the idea of whether there are adults or not, and whether there are two or more than two children, we get the above 4 cases, which is sufficient.
+\end{document}
